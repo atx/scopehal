@@ -120,7 +120,7 @@ RigolOscilloscope::RigolOscilloscope(SCPITransport* transport)
 	else
 	{
 		m_transport->SendCommand(":WAV:FORM BYTE");
-		m_transport->SendCommand(":WAV:MODE RAW");
+		m_transport->SendCommand(":WAV:MODE MAX");
 	}
 	if(m_protocol == MSO5 || m_protocol == DS_OLD)
 	{
@@ -162,6 +162,7 @@ void RigolOscilloscope::FlushConfigCache()
 	m_channelVoltageRanges.clear();
 	m_channelsEnabled.clear();
 	m_channelBandwidthLimits.clear();
+	m_channelPreambules.clear();
 
 	m_srateValid = false;
 	m_mdepthValid = false;
@@ -656,26 +657,41 @@ bool RigolOscilloscope::AcquireData()
 		else
 		{
 			m_transport->SendCommand(string("WAV:SOUR ") + m_channels[i]->GetHwname());
+			if (m_channelPreambules.find(i) == m_channelPreambules.end()) {
 
-			//This is basically the same function as a LeCroy WAVEDESC, but much less detailed
-			m_transport->SendCommand("WAV:PRE?");
-			string reply = m_transport->ReadReply();
-			//LogDebug("Preamble = %s\n", reply.c_str());
-			sscanf(reply.c_str(),
-				"%d,%d,%zu,%d,%lf,%lf,%lf,%lf,%lf,%lf",
-				&unused1,
-				&unused2,
-				&npoints,
-				&unused3,
-				&sec_per_sample,
-				&xorigin,
-				&xreference,
-				&yincrement,
-				&yorigin,
-				&yreference);
+				//This is basically the same function as a LeCroy WAVEDESC, but much less detailed
+				m_transport->SendCommand("WAV:PRE?");
+				string reply = m_transport->ReadReply();
+				LogDebug("Preamble = %s\n", reply.c_str());
+				sscanf(reply.c_str(),
+					"%d,%d,%zu,%d,%lf,%lf,%lf,%lf,%lf,%lf",
+					&unused1,
+					&unused2,
+					&npoints,
+					&unused3,
+					&sec_per_sample,
+					&xorigin,
+					&xreference,
+					&yincrement,
+					&yorigin,
+					&yreference);
+				m_channelPreambules[i] = std::make_tuple(
+					npoints, sec_per_sample, xorigin, xreference, yincrement,
+					yorigin, yreference
+				);
+				//LogDebug("X: %d points, %f origin, ref %f fs/sample %ld\n", npoints, xorigin, xreference, fs_per_sample);
+				//LogDebug("Y: %f inc, %f origin, %f ref\n", yincrement, yorigin, yreference);
+			} else {
+				auto preambule = m_channelPreambules[i];
+				npoints = std::get<0>(preambule);
+				sec_per_sample = std::get<1>(preambule);
+				xorigin = std::get<2>(preambule);
+				xreference = std::get<3>(preambule);
+				yincrement = std::get<4>(preambule);
+				yorigin = std::get<5>(preambule);
+				yreference = std::get<6>(preambule);
+			}
 			fs_per_sample = round(sec_per_sample * FS_PER_SECOND);
-			//LogDebug("X: %d points, %f origin, ref %f fs/sample %ld\n", npoints, xorigin, xreference, fs_per_sample);
-			//LogDebug("Y: %f inc, %f origin, %f ref\n", yincrement, yorigin, yreference);
 		}
 
 		//Set up the capture we're going to store our data into
@@ -793,11 +809,6 @@ bool RigolOscilloscope::AcquireData()
 			m_transport->SendCommand(":TRIG:EDGE:SWE SING");
 			m_transport->SendCommand(":RUN");
 		}
-		else
-		{
-			m_transport->SendCommand(":SING");
-			m_transport->SendCommand("*WAI");
-		}
 		m_triggerArmed = true;
 	}
 
@@ -817,8 +828,9 @@ void RigolOscilloscope::Start()
 	}
 	else
 	{
-		m_transport->SendCommand(":SING");
+		m_transport->SendCommand(":RUN");
 		m_transport->SendCommand("*WAI");
+		m_channelPreambules.clear();
 	}
 	m_triggerArmed = true;
 	m_triggerOneShot = false;
@@ -836,6 +848,7 @@ void RigolOscilloscope::StartSingleTrigger()
 	{
 		m_transport->SendCommand(":SING");
 		m_transport->SendCommand("*WAI");
+		m_channelPreambules.clear();
 	}
 	m_triggerArmed = true;
 	m_triggerOneShot = true;
