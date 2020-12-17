@@ -206,12 +206,14 @@ void RigolOscilloscope::EnableChannel(size_t i)
 {
 	lock_guard<recursive_mutex> lock(m_mutex);
 	m_transport->SendCommand(":" + m_channels[i]->GetHwname() + ":DISP ON");
+	m_channelsEnabled[i] = true;
 }
 
 void RigolOscilloscope::DisableChannel(size_t i)
 {
 	lock_guard<recursive_mutex> lock(m_mutex);
 	m_transport->SendCommand(":" + m_channels[i]->GetHwname() + ":DISP OFF");
+	m_channelsEnabled[i] = false;
 }
 
 OscilloscopeChannel::CouplingType RigolOscilloscope::GetChannelCoupling(size_t i)
@@ -601,9 +603,6 @@ bool RigolOscilloscope::AcquireData()
 {
 	//LogDebug("Acquiring data\n");
 
-	//TODO
-	bool enabled[4] = {true, true, true, true};
-
 	lock_guard<recursive_mutex> lock(m_mutex);
 	LogIndenter li;
 
@@ -629,7 +628,7 @@ bool RigolOscilloscope::AcquireData()
 	map<int, vector<AnalogWaveform*>> pending_waveforms;
 	for(size_t i = 0; i < m_analogChannelCount; i++)
 	{
-		if(!enabled[i])
+		if(!IsChannelEnabled(i))
 			continue;
 
 		//LogDebug("Channel %zu\n", i);
@@ -773,7 +772,7 @@ bool RigolOscilloscope::AcquireData()
 		SequenceSet s;
 		for(size_t j = 0; j < m_analogChannelCount; j++)
 		{
-			if(enabled[j])
+			if(IsChannelEnabled(j))
 				s[m_channels[j]] = pending_waveforms[j][i];
 		}
 		m_pendingWaveforms.push_back(s);
